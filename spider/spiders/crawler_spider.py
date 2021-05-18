@@ -15,8 +15,9 @@ class CrawlerSpider(scrapy.Spider):
     def start_requests(self):
         urls = self.crawl_by_sitemap_url(self.sitemap)
         for url in urls:
+            if not url:
+                continue
             yield scrapy.Request(url=url, callback=self.parse)
-        # self.createMultipleRecord()
 
     def parse(self, response):
         title = response.css('div.page-wrapper h1.the-article-title::text').get()
@@ -24,17 +25,16 @@ class CrawlerSpider(scrapy.Spider):
             return
         short_description = response.css('p.the-article-summary::text').get()
         content = response.css('.the-article-body *').getall()
-        if not isinstance(short_description, str) or not isinstance(content, str):
+        if not isinstance(short_description, str) or not isinstance(content, list):
             return
         article_url = response.url
         image = response.css('div.slideshow-images li::attr(data-image)').get()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        self.data.append(
-            [title, 0, 1, None, 1, 1, image, 'Zalo', article_url, now, now, now])
-
-        self.translate_data.append(
-            [title, 'vi', slugify(title), 0, short_description, ''.join(content), 1, now, now])
+        self.createMultipleRecord(
+            [title, 0, 1, None, 1, 1, image, 'Zalo', article_url, now, now, now],
+            [str(title), 'vi', str(slugify(title)), 0, str(short_description), str(''.join(content)), 1, now, now]
+        )
 
     @classmethod
     def crawl_by_sitemap_url(cls, sitemap_url):
@@ -49,7 +49,7 @@ class CrawlerSpider(scrapy.Spider):
         return article_data
 
     @classmethod
-    def createMultipleRecord(cls):
+    def createMultipleRecord(cls, article, translation):
         connection = pymysql.connect(
             host='localhost',
             user='sail',
@@ -58,22 +58,21 @@ class CrawlerSpider(scrapy.Spider):
         )
 
         # Save article data to database
+
         with connection.cursor() as cursor:
-            sql = "INSERT INTO articles " \
-                  "(`name` , `author_id`, `is_crawl`, `category_id`, `is_feature`, `status`, `thumbnail_image`, " \
-                  "`source`, `source_link`, `publish_date`, `created_at`, `updated_at`) " \
-                  "values " \
-                  "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            cursor.executemany(sql, cls.data)
-        # [title, 'vi', slugify(title), 0, '', content, 1, current_formatted, current_formatted]
-        with connection.cursor() as cursor:
-            sql = "INSERT INTO article_translations " \
-                  "(`title`, `language_code`, `slug`, `meta_data_id`, `short_description`, `content`, `status`, " \
-                  "`created_at`, `updated_at`) " \
-                  "values " \
-                  "(%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql, cls.translate_data)
-        connection.commit()
+            article_sql = "INSERT INTO articles " \
+                          "(`name` , `author_id`, `is_crawl`, `category_id`, `is_feature`, `status`, " \
+                          "`thumbnail_image`, `source`, `source_link`, `publish_date`, `created_at`, `updated_at`) " \
+                          "value (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(article_sql, article)
+            translation.append(cursor.lastrowid)
+            translation_sql = "INSERT INTO article_translations " \
+                              "(`title`, `language_code`, `slug`, `meta_data_id`, `short_description`, `content`, " \
+                              "`status`, `created_at`, `updated_at`, `article_id`) " \
+                              "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(translation_sql, translation)
+            connection.commit()
+
         connection.close()
 
     @classmethod
